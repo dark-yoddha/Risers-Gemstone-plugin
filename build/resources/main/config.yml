@@ -1,0 +1,39 @@
+################################################################################
+#                            💎 RisersGemstone Config                           #
+#                             Plugin by: Dark_Yoddha 🔮                         #
+#                          Title: Heir of the Risers Realm                      #
+#     Customize and control how elemental gemstones behave across worlds.       #
+#       Designed to protect legendary items and enhance player experience.      #
+################################################################################
+
+# 🌍 Worlds where gemstone mechanics are active
+enabled-worlds:
+  - world
+  - world_nether
+  - world_the_end
+
+# ⚙️ Gem Behavior Settings
+gem-settings:
+
+  # 🔁 Return on Drop
+  # Prevents players from dropping gems. Items are instantly returned to inventory.
+  return-on-drop: true
+
+  # 💀 Return on Death
+  # When a player dies, their gems automatically return to their inventory on respawn.
+  return-on-death: true
+
+  # 📦 Return on Container
+  # Blocks placing gems inside containers like chests, barrels, or hoppers.
+  return-on-container: true
+
+################################################################################
+#                              ⚠️ Server Owner Tips                            #
+# - Set return-on-drop to 'false' to allow trading of gems                     #
+# - Pair with protection plugins to prevent glitches or item theft             #
+# - Customize world-specific behavior using region flags or per-world configs  #
+################################################################################
+
+# 👑 Signature
+#   "These aren't just gems... they're fragments of legacy."
+#   — Dark_Yoddha | Heir of the Risers Realm

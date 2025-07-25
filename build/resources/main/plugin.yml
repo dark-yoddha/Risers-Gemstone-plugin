@@ -1,0 +1,16 @@
+name: RisersGemstone
+version: '1.0'
+main: com.Gemstone.Main
+api-version: '1.21'
+
+commands:
+  gemstone:
+    description: Manage gemstones by giving or taking them from players.
+    usage: /<command> <give|take> <player> <gem>
+    aliases: [gem]
+    permission: gemstone.admin
+
+permissions:
+  gemstone.admin:
+    description: Allows access to /gemstone give and /gemstone take.
+    default: op
