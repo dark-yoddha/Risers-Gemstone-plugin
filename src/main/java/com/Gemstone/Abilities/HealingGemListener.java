@@ -6,9 +6,11 @@ import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
@@ -35,7 +37,6 @@ public class HealingGemListener implements Listener {
     public HealingGemListener(JavaPlugin plugin) {
         this.plugin = plugin;
 
-        // 🕒 Periodic tasks
         Bukkit.getScheduler().runTaskTimer(this.plugin, () -> {
             long now = System.currentTimeMillis();
 
@@ -66,7 +67,6 @@ public class HealingGemListener implements Listener {
                     }
                 }
 
-                // Expired buff check
                 if (boostedUntil.containsKey(uuid)) {
                     if (now > boostedUntil.get(uuid)) {
                         resetHealth(player);
@@ -74,6 +74,7 @@ public class HealingGemListener implements Listener {
                         originalHealthCache.remove(uuid);
                         player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                                 new TextComponent(ChatColor.YELLOW + "Healing Gem effect has worn off. Extra hearts removed."));
+                        player.removePotionEffect(PotionEffectType.RESISTANCE);
                         continue;
                     }
 
@@ -85,6 +86,25 @@ public class HealingGemListener implements Listener {
                         }
                     } else {
                         resetHealth(player);
+                    }
+                }
+                if (holdingGem) {
+                    if (player.getWorld().getEnvironment() == World.Environment.NORMAL) {
+                        if (!player.hasPotionEffect(PotionEffectType.RESISTANCE) ||
+                                player.getPotionEffect(PotionEffectType.RESISTANCE).getAmplifier() < 0 ||
+                                player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() < Integer.MAX_VALUE / 2) {
+                            player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, true));
+                        }
+                    } else {
+                        if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
+                                player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
+                            player.removePotionEffect(PotionEffectType.RESISTANCE);
+                        }
+                    }
+                } else {
+                    if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
+                            player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
+                        player.removePotionEffect(PotionEffectType.RESISTANCE);
                     }
                 }
             }
@@ -116,8 +136,11 @@ public class HealingGemListener implements Listener {
             return;
         }
 
-        player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 1, true, false, true));
+        player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 2, true, false, true));
+        player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 200, 1, true, false, true));
+
         AttributeInstance attr = player.getAttribute(Attribute.MAX_HEALTH);
+
         if (attr != null) {
             double base = attr.getBaseValue();
             originalHealthCache.put(uuid, base);
@@ -127,6 +150,19 @@ public class HealingGemListener implements Listener {
         cooldowns.put(uuid, now);
         player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                 new TextComponent(ChatColor.GREEN + "Healing Gem activated! Regeneration and 2 extra hearts applied."));
+
+
+        final double HEALING_RADIUS = 5.0; // 5-block radius
+        final int REGENERATION_DURATION_TICKS = 10 * 20; // 10 seconds (20 ticks per second)
+        final int REGENERATION_AMPLIFIER = 1; // Level 2 (amplifier 1)
+
+        for (Entity nearbyEntity : player.getNearbyEntities(HEALING_RADIUS, HEALING_RADIUS, HEALING_RADIUS)) {
+            if (nearbyEntity instanceof Player nearbyPlayer && !nearbyPlayer.equals(player)) {
+                nearbyPlayer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, REGENERATION_DURATION_TICKS,REGENERATION_AMPLIFIER,true, false,true));
+                nearbyPlayer.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        new TextComponent(ChatColor.GREEN + player.getName() + "'s Healing Gem healed you!"));
+            }
+        }
     }
 
     @EventHandler
@@ -138,6 +174,22 @@ public class HealingGemListener implements Listener {
         resetHealth(player);
         boostedUntil.remove(uuid);
         originalHealthCache.remove(uuid);
+        // Ensure permanent effects are applied/removed on join based on current state
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
+            ItemStack main = player.getInventory().getItemInMainHand();
+            ItemStack off = player.getInventory().getItemInOffHand();
+            boolean holdingGem = activeGem != null &&
+                    ((activeGem.isSimilar(main) && isHealingGem(main)) ||
+                            (main.getType() == Material.AIR && activeGem.isSimilar(off) && isHealingGem(off)));
+
+            if (!holdingGem || player.getWorld().getEnvironment() != World.Environment.NORMAL) {
+                if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
+                        player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
+                    player.removePotionEffect(PotionEffectType.RESISTANCE);
+                }
+            }
+        }, 20L);
     }
 
     @EventHandler
