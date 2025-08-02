@@ -28,11 +28,10 @@ import java.util.*;
 public class HealingGemListener implements Listener {
     private final JavaPlugin plugin;
     private final long cooldownMillis = 60000L;
-    private final long buffDurationMillis = 15000L;
+    private final long buffDurationMillis = 15000L; // 15 seconds for buff
 
     private final Map<UUID, Long> cooldowns = new HashMap<>();
-    private final Map<UUID, Long> boostedUntil = new HashMap<>();
-    private final Map<UUID, Double> originalHealthCache = new HashMap<>();
+    private final Map<UUID, Long> boostedUntil = new HashMap<>(); // Still useful for tracking the active buff from your gem
 
     public HealingGemListener(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -44,12 +43,11 @@ public class HealingGemListener implements Listener {
                 if (!((com.Gemstone.Main) plugin).isWorldEnabled(player.getWorld().getName())) continue;
 
                 UUID uuid = player.getUniqueId();
-                AttributeInstance attr = player.getAttribute(Attribute.MAX_HEALTH);
                 ItemStack main = player.getInventory().getItemInMainHand();
                 ItemStack off = player.getInventory().getItemInOffHand();
                 ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
 
-                boolean holdingGem = activeGem != null &&
+                boolean holdingHealingGem = activeGem != null &&
                         ((activeGem.isSimilar(main) && isHealingGem(main)) ||
                                 (main.getType() == Material.AIR && activeGem.isSimilar(off) && isHealingGem(off)));
 
@@ -67,41 +65,27 @@ public class HealingGemListener implements Listener {
                     }
                 }
 
-                if (boostedUntil.containsKey(uuid)) {
-                    if (now > boostedUntil.get(uuid)) {
-                        resetHealth(player);
-                        boostedUntil.remove(uuid);
-                        originalHealthCache.remove(uuid);
-                        player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                                new TextComponent(ChatColor.YELLOW + "Healing Gem effect has worn off. Extra hearts removed."));
+                // Check if our custom buff has worn off (for message and resistance removal)
+                if (boostedUntil.containsKey(uuid) && now > boostedUntil.get(uuid)) {
+                    boostedUntil.remove(uuid);
+                    // Remove the RESISTANCE effect that was applied with the buff
+                    if (player.hasPotionEffect(PotionEffectType.RESISTANCE) && player.getPotionEffect(PotionEffectType.RESISTANCE).getAmplifier() == 1) {
                         player.removePotionEffect(PotionEffectType.RESISTANCE);
-                        continue;
                     }
-
-                    // Buff active, check if gem is held
-                    if (holdingGem) {
-                        if (attr != null && attr.getBaseValue() == originalHealthCache.getOrDefault(uuid, 20.0)) {
-                            attr.setBaseValue(attr.getBaseValue() + 8.0);
-                            player.setHealth(Math.min(player.getHealth() + 8.0, attr.getValue()));
-                        }
-                    } else {
-                        resetHealth(player);
-                    }
+                    player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                            new TextComponent(ChatColor.YELLOW + "Healing Gem buff has worn off."));
                 }
-                if (holdingGem) {
-                    if (player.getWorld().getEnvironment() == World.Environment.NORMAL) {
-                        if (!player.hasPotionEffect(PotionEffectType.RESISTANCE) ||
-                                player.getPotionEffect(PotionEffectType.RESISTANCE).getAmplifier() < 0 ||
-                                player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() < Integer.MAX_VALUE / 2) {
-                            player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, true));
-                        }
-                    } else {
-                        if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
-                                player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
-                            player.removePotionEffect(PotionEffectType.RESISTANCE);
-                        }
+
+
+                // Permanent Resistance effect while holding the gem in NORMAL world
+                if (holdingHealingGem && player.getWorld().getEnvironment() == World.Environment.NORMAL) {
+                    if (!player.hasPotionEffect(PotionEffectType.RESISTANCE) ||
+                            player.getPotionEffect(PotionEffectType.RESISTANCE).getAmplifier() < 0 ||
+                            player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() < Integer.MAX_VALUE / 2) {
+                        player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, true));
                     }
                 } else {
+                    // Remove permanent resistance if not holding gem or in wrong world
                     if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
                             player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
                         player.removePotionEffect(PotionEffectType.RESISTANCE);
@@ -136,20 +120,15 @@ public class HealingGemListener implements Listener {
             return;
         }
 
-        player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 2, true, false, true));
-        player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 200, 1, true, false, true));
-
-        AttributeInstance attr = player.getAttribute(Attribute.MAX_HEALTH);
-
-        if (attr != null) {
-            double base = attr.getBaseValue();
-            originalHealthCache.put(uuid, base);
-        }
+        // Apply temporary buff effects using PotionEffect
+        player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, (int)(buffDurationMillis / 50), 2, true, false, true)); // Level 3 Regeneration
+        player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, (int)(buffDurationMillis / 50), 1, true, false, true)); // Level 2 Resistance
+        player.addPotionEffect(new PotionEffect(PotionEffectType.HEALTH_BOOST, (int)(buffDurationMillis / 50), 3, true, false, true)); // +8 hearts
 
         boostedUntil.put(uuid, now + buffDurationMillis);
         cooldowns.put(uuid, now);
         player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                new TextComponent(ChatColor.GREEN + "Healing Gem activated! Regeneration and 2 extra hearts applied."));
+                new TextComponent(ChatColor.GREEN + "Healing Gem activated! Regeneration, Resistance, and 8 extra hearts applied."));
 
 
         final double HEALING_RADIUS = 5.0; // 5-block radius
@@ -158,7 +137,7 @@ public class HealingGemListener implements Listener {
 
         for (Entity nearbyEntity : player.getNearbyEntities(HEALING_RADIUS, HEALING_RADIUS, HEALING_RADIUS)) {
             if (nearbyEntity instanceof Player nearbyPlayer && !nearbyPlayer.equals(player)) {
-                nearbyPlayer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, REGENERATION_DURATION_TICKS,REGENERATION_AMPLIFIER,true, false,true));
+                nearbyPlayer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, REGENERATION_DURATION_TICKS, REGENERATION_AMPLIFIER, true, false, true));
                 nearbyPlayer.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                         new TextComponent(ChatColor.GREEN + player.getName() + "'s Healing Gem healed you!"));
             }
@@ -170,26 +149,36 @@ public class HealingGemListener implements Listener {
         Player player = event.getPlayer();
         if (!((com.Gemstone.Main) plugin).isWorldEnabled(player.getWorld().getName())) return;
 
-        UUID uuid = player.getUniqueId();
-        resetHealth(player);
-        boostedUntil.remove(uuid);
-        originalHealthCache.remove(uuid);
         // Ensure permanent effects are applied/removed on join based on current state
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
             ItemStack main = player.getInventory().getItemInMainHand();
             ItemStack off = player.getInventory().getItemInOffHand();
-            boolean holdingGem = activeGem != null &&
+            boolean holdingHealingGem = activeGem != null &&
                     ((activeGem.isSimilar(main) && isHealingGem(main)) ||
                             (main.getType() == Material.AIR && activeGem.isSimilar(off) && isHealingGem(off)));
 
-            if (!holdingGem || player.getWorld().getEnvironment() != World.Environment.NORMAL) {
+            if (!holdingHealingGem || player.getWorld().getEnvironment() != World.Environment.NORMAL) {
                 if (player.hasPotionEffect(PotionEffectType.RESISTANCE) &&
                         player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
                     player.removePotionEffect(PotionEffectType.RESISTANCE);
                 }
+                if (player.hasPotionEffect(PotionEffectType.REGENERATION) &&
+                        player.getPotionEffect(PotionEffectType.REGENERATION).getDuration() > Integer.MAX_VALUE / 2) {
+                    player.removePotionEffect(PotionEffectType.REGENERATION);
+                }
+            } else {
+                // If holding and in normal world, ensure permanent regeneration and resistance are applied
+                if (!player.hasPotionEffect(PotionEffectType.RESISTANCE) ||
+                        player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() < Integer.MAX_VALUE / 2) {
+                    player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, true));
+                }
+                if (!player.hasPotionEffect(PotionEffectType.REGENERATION) ||
+                        player.getPotionEffect(PotionEffectType.REGENERATION).getDuration() < Integer.MAX_VALUE / 2) {
+                    player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0, true, false, true));
+                }
             }
-        }, 20L);
+        }, 20L); // Delay to allow other plugins to load
     }
 
     @EventHandler
@@ -197,11 +186,9 @@ public class HealingGemListener implements Listener {
         Player player = event.getPlayer();
         if (!((com.Gemstone.Main) plugin).isWorldEnabled(player.getWorld().getName())) return;
 
-        ItemStack newItem = player.getInventory().getItem(event.getNewSlot());
-        ItemStack oldItem = player.getInventory().getItem(event.getPreviousSlot());
-        applyEffects(player, newItem);
-        removeEffects(player, oldItem);
-        resetHealth(event.getPlayer());
+        // Apply/remove permanent effects based on the new item held
+        // The HEALTH_BOOST effect for the buff is temporary and will expire on its own
+        updatePermanentEffects(player);
     }
 
     @EventHandler
@@ -209,44 +196,40 @@ public class HealingGemListener implements Listener {
         Player player = event.getPlayer();
         if (!((com.Gemstone.Main) plugin).isWorldEnabled(player.getWorld().getName())) return;
 
-        ItemStack mainHandItem = player.getInventory().getItemInMainHand();
-        ItemStack offHandItem = player.getInventory().getItemInOffHand();
-        removeEffects(player, mainHandItem);
-        removeEffects(player, offHandItem);
-        applyEffects(player, offHandItem);
-        applyEffects(player, mainHandItem);
-        resetHealth(player);
+        // Apply/remove permanent effects based on the new item in main/off hand
+        updatePermanentEffects(player);
     }
 
-    private void resetHealth(Player player) {
-        UUID uuid = player.getUniqueId();
-        AttributeInstance attr = player.getAttribute(Attribute.MAX_HEALTH);
-        double originalBase = originalHealthCache.getOrDefault(uuid, 20.0);
-        if (attr != null && attr.getBaseValue() > originalBase) {
-            attr.setBaseValue(originalBase);
-            if (player.getHealth() > originalBase) {
-                player.setHealth(originalBase);
+    // Helper method to update permanent effects based on currently held gem
+    private void updatePermanentEffects(Player player) {
+        ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
+        ItemStack main = player.getInventory().getItemInMainHand();
+        ItemStack off = player.getInventory().getItemInOffHand();
+        boolean holdingHealingGem = activeGem != null &&
+                ((activeGem.isSimilar(main) && isHealingGem(main)) ||
+                        (main.getType() == Material.AIR && activeGem.isSimilar(off) && isHealingGem(off)));
+
+        if (holdingHealingGem && player.getWorld().getEnvironment() == World.Environment.NORMAL) {
+            if (!player.hasPotionEffect(PotionEffectType.RESISTANCE) || player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() < Integer.MAX_VALUE / 2) {
+                player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, true));
+            }
+            if (!player.hasPotionEffect(PotionEffectType.REGENERATION) || player.getPotionEffect(PotionEffectType.REGENERATION).getDuration() < Integer.MAX_VALUE / 2) {
+                player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0, true, false, true));
+            }
+        } else {
+            if (player.hasPotionEffect(PotionEffectType.RESISTANCE) && player.getPotionEffect(PotionEffectType.RESISTANCE).getDuration() > Integer.MAX_VALUE / 2) {
+                player.removePotionEffect(PotionEffectType.RESISTANCE);
+            }
+            if (player.hasPotionEffect(PotionEffectType.REGENERATION) && player.getPotionEffect(PotionEffectType.REGENERATION).getDuration() > Integer.MAX_VALUE / 2) {
+                player.removePotionEffect(PotionEffectType.REGENERATION);
             }
         }
     }
 
-    private void applyEffects(Player player, ItemStack heldItem) {
-        ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
-        if (activeGem != null && heldItem != null && activeGem.isSimilar(heldItem) && isHealingGem(heldItem)) {
-            player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0, true, false, true));
-        }
-    }
-
-    private void removeEffects(Player player, ItemStack heldItem) {
-        ItemStack activeGem = ActiveGemTracker.getActiveGem(player);
-        if (activeGem != null && heldItem != null && activeGem.isSimilar(heldItem) && isHealingGem(heldItem)) {
-            player.removePotionEffect(PotionEffectType.REGENERATION);
-        }
-    }
 
     private boolean isHealingGem(ItemStack item) {
         return item != null &&
-                item.getType() == Material.WOODEN_SWORD &&
+                item.getType() == Material.WOODEN_SWORD && // Or whatever your gem material is
                 item.hasItemMeta() &&
                 ChatColor.stripColor(item.getItemMeta().getDisplayName()).equals("Healing Gem");
     }
